@@ -229,6 +229,7 @@ export async function updateQuestion(payload: UpdateQuestionPayload): Promise<Sh
   if (idx === -1) throw new Error(`Question "${payload._id}" not found`)
 
   const question = cachedQuestions[idx]
+  if (!question) throw new Error(`Question "${payload._id}" not found`)
   if (payload.title !== undefined) {
     question.title = payload.title
     question.questionId.name = payload.title

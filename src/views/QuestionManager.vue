@@ -1,5 +1,5 @@
 <template>
-    <div class="max-w-7xl mx-auto px-4 py-6">
+    <div class="max-w-7xl mx-auto px-4 pb-6">
         <!-- Header Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div class="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
@@ -12,23 +12,20 @@
             </div>
             <div class="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
                 <div class="text-sm text-gray-400">Progress</div>
-                <div class="text-2xl font-bold text-blue-400">
-                    {{ store.totalQuestions > 0 ? Math.round((store.solvedQuestions / store.totalQuestions) * 100) : 0
-                    }}%
-                </div>
+                <div class="text-2xl font-bold text-blue-400">{{ store.progressPercent }}%</div>
                 <div class="w-full bg-gray-700 rounded-full h-2 mt-2">
                     <div class="bg-gradient-to-r from-blue-500 to-green-400 h-2 rounded-full transition-all duration-500"
-                        :style="{ width: store.totalQuestions > 0 ? (store.solvedQuestions / store.totalQuestions) * 100 + '%' : '0%' }">
-                    </div>
+                        :style="{ width: store.progressPercent + '%' }"></div>
                 </div>
             </div>
         </div>
 
         <!-- Controls Bar -->
         <div class="flex flex-wrap items-center gap-3 mb-6">
-            <!-- Search -->
             <div class="relative flex-1 min-w-[200px]">
-                <input v-model="store.searchQuery" type="text" placeholder="Search questions..."
+                <input :value="store.searchQuery"
+                    @input="store.setSearchQuery(($event.target as HTMLInputElement).value)" type="text"
+                    placeholder="Search questions..."
                     class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
@@ -37,8 +34,8 @@
                 </svg>
             </div>
 
-            <!-- Difficulty Filter -->
-            <select v-model="store.filterDifficulty"
+            <select :value="store.filterDifficulty"
+                @change="store.setFilterDifficulty(($event.target as HTMLSelectElement).value)"
                 class="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="all" class="bg-gray-800">All Difficulties</option>
                 <option value="Easy" class="bg-gray-800">Easy</option>
@@ -46,7 +43,6 @@
                 <option value="Hard" class="bg-gray-800">Hard</option>
             </select>
 
-            <!-- Add Topic Button -->
             <button @click="showAddTopicModal = true"
                 class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors cursor-pointer">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -100,12 +96,12 @@
                         </button>
                         <h2 class="text-lg font-semibold text-white">{{ group.name }}</h2>
                         <span class="text-sm text-gray-400">
-                            ({{ getTopicQuestionCount(group) }} questions)
+                            ({{ store.getTopicQuestionCount(group.name) }} questions)
                         </span>
-                        <!-- Topic progress -->
                         <span v-if="store.topicStats[group.name]" class="text-xs px-2 py-0.5 rounded-full"
-                            :class="getProgressClass(store.topicStats[group.name])">
-                            {{ store.topicStats[group.name].solved }}/{{ store.topicStats[group.name].total }}
+                            :class="progressBadgeClass(store.topicStats[group.name] ?? { total: 0, solved: 0 })">
+                            {{ store.topicStats[group.name]?.solved ?? 0 }}/{{ store.topicStats[group.name]?.total ?? 0
+                            }}
                         </span>
                     </div>
                     <div class="flex items-center gap-2">
@@ -154,7 +150,6 @@
                             <div
                                 class="flex items-center justify-between px-3 py-2 hover:bg-white/10 transition-colors">
                                 <div class="flex items-center gap-2">
-                                    <!-- Sub-topic drag handle -->
                                     <div
                                         class="subtopic-drag-handle cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 transition-colors">
                                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -282,7 +277,7 @@
         <ModalOverlay :show="showAddSubTopicModal" @close="showAddSubTopicModal = false">
             <h3 class="text-lg font-semibold text-white mb-2">Add Sub-Topic</h3>
             <p class="text-sm text-gray-400 mb-4">Under topic: <strong class="text-gray-200">{{ modalTopicContext
-                    }}</strong></p>
+            }}</strong></p>
             <input v-model="newSubTopicName" type="text" placeholder="Sub-topic name"
                 class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
                 @keyup.enter="handleAddSubTopic" />
@@ -313,8 +308,8 @@
             <h3 class="text-lg font-semibold text-white mb-2">Add Question</h3>
             <p class="text-sm text-gray-400 mb-4">
                 Topic: <strong class="text-gray-200">{{ questionForm.topic }}</strong>
-                <span v-if="questionForm.subTopic"> → Sub-topic: <strong class="text-gray-200">{{ questionForm.subTopic
-                        }}</strong></span>
+                <span v-if="questionForm.subTopic"> → Sub-topic: <strong class="text-gray-200">{{
+                    questionForm.subTopic }}</strong></span>
             </p>
             <div class="space-y-3">
                 <input v-model="questionForm.title" type="text" placeholder="Question title"
@@ -372,16 +367,35 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * QuestionManager — UI-only component.
+ *
+ * Responsibilities:
+ *   ✅ Rendering store getters
+ *   ✅ UI-local state (collapse, modals, form inputs)
+ *   ✅ SortableJS wiring (DOM refs, instance lifecycle)
+ *   ✅ Translating SortableJS events into intent-based store actions
+ *   ✅ CSS-class mapping (progressBadgeClass)
+ *
+ * NOT responsible for:
+ *   ❌ Derived calculations (counts, progress, stats)
+ *   ❌ Array reordering logic
+ *   ❌ Data filtering / search matching
+ *   ❌ DOM-scraping to build new order arrays
+ */
 import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick, type ComponentPublicInstance } from 'vue'
 import Sortable from 'sortablejs'
 import { useSheetStore } from '@/stores/sheet'
-import type { SheetQuestion, TopicGroup } from '@/types'
+import type { SheetQuestion } from '@/types'
 import ModalOverlay from '@/components/ModalOverlay.vue'
 import QuestionRow from '@/components/QuestionRow.vue'
 
 const store = useSheetStore()
 
-// ─── Collapse state (keyed by name for stability) ───
+// ═══════════════════════════════════════════════════
+// ─── UI-Local State (not domain data) ───
+// ═══════════════════════════════════════════════════
+
 const collapsedTopics = ref<Record<string, boolean>>({})
 const collapsedSubTopics = ref<Record<string, boolean>>({})
 
@@ -394,18 +408,19 @@ function toggleSubTopic(topicName: string, subTopicName: string) {
     collapsedSubTopics.value[key] = !collapsedSubTopics.value[key]
 }
 
-function getTopicQuestionCount(group: TopicGroup): number {
-    return group.questions.length + group.subTopics.reduce((sum, st) => sum + st.questions.length, 0)
-}
-
-function getProgressClass(stat: { total: number; solved: number }): string {
+/** Pure UI concern: map stat data → Tailwind classes */
+function progressBadgeClass(stat: { total: number; solved: number }): string {
     const pct = stat.total > 0 ? stat.solved / stat.total : 0
     if (pct === 1) return 'bg-green-500/30 text-green-300'
     if (pct >= 0.5) return 'bg-yellow-500/30 text-yellow-300'
     return 'bg-gray-500/30 text-gray-300'
 }
 
-// ─── Topic modals ───
+// ═══════════════════════════════════════════════════
+// ─── Modal / Form State (UI-only) ───
+// ═══════════════════════════════════════════════════
+
+// Topic modals
 const showAddTopicModal = ref(false)
 const newTopicName = ref('')
 const showEditTopicModal = ref(false)
@@ -431,7 +446,7 @@ async function handleEditTopic() {
     showEditTopicModal.value = false
 }
 
-// ─── Sub-Topic modals ───
+// Sub-Topic modals
 const showAddSubTopicModal = ref(false)
 const newSubTopicName = ref('')
 const modalTopicContext = ref('')
@@ -466,7 +481,7 @@ async function handleEditSubTopic() {
     showEditSubTopicModal.value = false
 }
 
-// ─── Question modals ───
+// Question modals
 const showAddQuestionModal = ref(false)
 const questionForm = reactive({
     topic: '',
@@ -527,7 +542,7 @@ async function handleEditQuestion() {
     showEditQuestionModal.value = false
 }
 
-// ─── Delete confirmation ───
+// Delete confirmation
 const showDeleteConfirm = ref(false)
 const deleteConfirmMessage = ref('')
 let pendingDeleteAction: (() => Promise<void>) | null = null
@@ -559,14 +574,23 @@ async function handleConfirmDelete() {
 }
 
 // ═══════════════════════════════════════════════════
-// ─── SortableJS Drag & Drop Integration ───
+// ─── SortableJS Wiring (UI plumbing only) ───
+//
+// The component's ONLY drag-and-drop responsibility is:
+//   1. Managing DOM refs and Sortable instances
+//   2. Translating SortableJS `onEnd(evt)` into
+//      store.moveTopic(oldIndex, newIndex)
+//      store.moveSubTopic(topic, oldIndex, newIndex)
+//      store.moveQuestion(topic, subTopic, oldIndex, newIndex)
+//
+// It never reads DOM children to build arrays.
+// It never computes the new order — the store does that.
 // ═══════════════════════════════════════════════════
 
 const topicListRef = ref<HTMLElement | null>(null)
 const subTopicListRefs = ref<Record<string, HTMLElement>>({})
 const questionListRefs = ref<Record<string, HTMLElement>>({})
 
-// Track Sortable instances for cleanup
 let topicSortableInstance: Sortable | null = null
 const subTopicSortableInstances: Record<string, Sortable> = {}
 const questionSortableInstances: Record<string, Sortable> = {}
@@ -594,11 +618,11 @@ function destroyAllSortables() {
         topicSortableInstance = null
     }
     for (const key of Object.keys(subTopicSortableInstances)) {
-        subTopicSortableInstances[key].destroy()
+        subTopicSortableInstances[key]?.destroy()
         delete subTopicSortableInstances[key]
     }
     for (const key of Object.keys(questionSortableInstances)) {
-        questionSortableInstances[key].destroy()
+        questionSortableInstances[key]?.destroy()
         delete questionSortableInstances[key]
     }
 }
@@ -606,7 +630,7 @@ function destroyAllSortables() {
 function initSortables() {
     destroyAllSortables()
 
-    // 1. Topic-level sortable
+    // 1. Topics — intent: moveTopic(oldIndex, newIndex)
     if (topicListRef.value) {
         topicSortableInstance = Sortable.create(topicListRef.value, {
             animation: 200,
@@ -614,19 +638,15 @@ function initSortables() {
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
             dragClass: 'sortable-drag',
-            onEnd: () => {
-                const children = topicListRef.value!.children
-                const newOrder: string[] = []
-                for (let i = 0; i < children.length; i++) {
-                    const topic = (children[i] as HTMLElement).dataset.topic
-                    if (topic) newOrder.push(topic)
+            onEnd: (evt) => {
+                if (evt.oldIndex !== undefined && evt.newIndex !== undefined) {
+                    store.moveTopic(evt.oldIndex, evt.newIndex)
                 }
-                store.reorderTopics(newOrder)
             },
         })
     }
 
-    // 2. Sub-topic sortables (one per topic)
+    // 2. Sub-topics — intent: moveSubTopic(topic, oldIndex, newIndex)
     for (const [topicName, el] of Object.entries(subTopicListRefs.value)) {
         if (!el) continue
         subTopicSortableInstances[topicName] = Sortable.create(el, {
@@ -635,19 +655,15 @@ function initSortables() {
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
             dragClass: 'sortable-drag',
-            onEnd: () => {
-                const children = el.children
-                const newOrder: string[] = []
-                for (let i = 0; i < children.length; i++) {
-                    const st = (children[i] as HTMLElement).dataset.subtopic
-                    if (st) newOrder.push(st)
+            onEnd: (evt) => {
+                if (evt.oldIndex !== undefined && evt.newIndex !== undefined) {
+                    store.moveSubTopic(topicName, evt.oldIndex, evt.newIndex)
                 }
-                store.reorderSubTopics(topicName, newOrder)
             },
         })
     }
 
-    // 3. Question sortables (one per topic/subtopic combo)
+    // 3. Questions — intent: moveQuestion(topic, subTopic, oldIndex, newIndex)
     for (const [key, el] of Object.entries(questionListRefs.value)) {
         if (!el) continue
         const [topicName, subTopicPart] = key.split('::')
@@ -659,33 +675,23 @@ function initSortables() {
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
             dragClass: 'sortable-drag',
-            onEnd: () => {
-                const children = el.children
-                const newOrder: string[] = []
-                for (let i = 0; i < children.length; i++) {
-                    const id = (children[i] as HTMLElement).dataset.id
-                    if (id) newOrder.push(id)
-                }
-                if (newOrder.length > 0) {
-                    store.reorderQuestions(topicName, subTopic, newOrder)
+            onEnd: (evt) => {
+                if (evt.oldIndex !== undefined && evt.newIndex !== undefined) {
+                    store.moveQuestion(topicName, subTopic, evt.oldIndex, evt.newIndex)
                 }
             },
         })
     }
 }
 
-// Watch store data changes and reinitialize sortables when the DOM updates
+// Re-init sortables when the data-driven DOM changes
 watch(
     () => store.topicGroups,
-    () => {
-        nextTick(() => {
-            initSortables()
-        })
-    },
+    () => nextTick(initSortables),
     { deep: true },
 )
 
-// ─── Init ───
+// ─── Lifecycle ───
 onMounted(async () => {
     await store.initialize()
     await nextTick()
@@ -696,22 +702,3 @@ onBeforeUnmount(() => {
     destroyAllSortables()
 })
 </script>
-
-<style>
-/* SortableJS ghost/drag styles */
-.sortable-ghost {
-    opacity: 0.4;
-    background: rgba(59, 130, 246, 0.15) !important;
-    border-radius: 0.75rem;
-}
-
-.sortable-chosen {
-    background: rgba(59, 130, 246, 0.1) !important;
-}
-
-.sortable-drag {
-    opacity: 0.9;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    border-radius: 0.75rem;
-}
-</style>

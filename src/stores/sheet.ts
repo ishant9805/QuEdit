@@ -4,22 +4,30 @@ import type { Sheet, SheetQuestion, TopicGroup, SubTopicGroup, CreateQuestionPay
 import * as api from '@/services/api'
 
 export const useSheetStore = defineStore('sheet', () => {
-  // ─── State ───
+  // ═══════════════════════════════════════════════════
+  // ─── Canonical State (single source of truth) ───
+  // ═══════════════════════════════════════════════════
   const sheet = ref<Sheet | null>(null)
   const questions = ref<SheetQuestion[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  // ─── Filter State (UI-driven, but owned by store for getter access) ───
   const searchQuery = ref('')
   const filterDifficulty = ref<string>('all')
 
-  // ─── Helpers ───
-  function filterQuestion(q: SheetQuestion): boolean {
+  // ═══════════════════════════════════════════════════
+  // ─── Private Helpers ───
+  // ═══════════════════════════════════════════════════
+
+  function matchesFilters(q: SheetQuestion): boolean {
+    const query = searchQuery.value.toLowerCase()
     const matchesSearch =
-      !searchQuery.value ||
-      q.title.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      q.questionId.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      q.topic.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      (q.subTopic && q.subTopic.toLowerCase().includes(searchQuery.value.toLowerCase()))
+      !query ||
+      q.title.toLowerCase().includes(query) ||
+      q.questionId.name.toLowerCase().includes(query) ||
+      q.topic.toLowerCase().includes(query) ||
+      (q.subTopic?.toLowerCase().includes(query) ?? false)
 
     const matchesDifficulty =
       filterDifficulty.value === 'all' ||
@@ -28,21 +36,36 @@ export const useSheetStore = defineStore('sheet', () => {
     return matchesSearch && matchesDifficulty
   }
 
-  // ─── Computed: build hierarchical topic → subtopic → question groups ───
+  /** Sync local state from the API layer after any mutation */
+  function syncFromApi() {
+    sheet.value = api.getSheet()
+    questions.value = api.getQuestions()
+  }
+
+  /** Generic array reorder: move item at oldIndex to newIndex */
+  function reorderArray<T>(arr: T[], oldIndex: number, newIndex: number): T[] {
+    const result = [...arr]
+    const [item] = result.splice(oldIndex, 1)
+    result.splice(newIndex, 0, item)
+    return result
+  }
+
+  // ═══════════════════════════════════════════════════
+  // ─── Getters (derived data, framework-agnostic) ───
+  // ═══════════════════════════════════════════════════
+
+  /** Hierarchical view: Topic → SubTopic → Questions, with filters applied */
   const topicGroups = computed<TopicGroup[]>(() => {
     if (!sheet.value) return []
 
     const topicOrder = sheet.value.config.topicOrder
     const subTopicOrder = sheet.value.config.subTopicOrder || {}
-
-    // All questions, preserving their original array order (which is the "question order")
     const allQ = questions.value
 
     return topicOrder.map((topicName) => {
-      // All questions for this topic, in array order
       const topicQuestions = allQ.filter((q) => q.topic === topicName)
 
-      // Build the sub-topic list: start from declared subTopicOrder, then add any extras from questions
+      // Build sub-topic list: declared order first, then any extras from questions
       const declaredSubs = subTopicOrder[topicName] || []
       const questionSubs = [...new Set(
         topicQuestions.filter((q) => q.subTopic).map((q) => q.subTopic as string),
@@ -52,48 +75,53 @@ export const useSheetStore = defineStore('sheet', () => {
         ...questionSubs.filter((st) => !declaredSubs.includes(st)),
       ]
 
-      // Build sub-topic groups
-      const subTopics: SubTopicGroup[] = allSubTopicNames.map((stName) => {
-        const stQuestions = topicQuestions.filter((q) => q.subTopic === stName)
-        const filteredStQuestions = stQuestions.filter(filterQuestion)
-        return {
-          name: stName,
-          questions: filteredStQuestions,
-          allQuestions: stQuestions, // unfiltered, for stats
-          collapsed: false,
-        }
-      })
-
-      // Questions directly under the topic (no sub-topic)
-      const directQuestions = topicQuestions.filter((q) => !q.subTopic)
-      const filteredDirectQuestions = directQuestions.filter(filterQuestion)
+      const subTopics: SubTopicGroup[] = allSubTopicNames.map((stName) => ({
+        name: stName,
+        questions: topicQuestions.filter((q) => q.subTopic === stName).filter(matchesFilters),
+      }))
 
       return {
         name: topicName,
         subTopics,
-        questions: filteredDirectQuestions,
-        allQuestions: directQuestions,
-        collapsed: false,
+        questions: topicQuestions.filter((q) => !q.subTopic).filter(matchesFilters),
       }
     })
   })
 
-  // ─── Stats ───
   const totalQuestions = computed(() => questions.value.length)
+
   const solvedQuestions = computed(
     () => questions.value.filter((q) => q.isSolved).length,
   )
+
+  /** Progress as 0-100 integer, ready for display */
+  const progressPercent = computed(() =>
+    totalQuestions.value > 0
+      ? Math.round((solvedQuestions.value / totalQuestions.value) * 100)
+      : 0,
+  )
+
+  /** Per-topic stats { total, solved } keyed by topic name */
   const topicStats = computed(() => {
     const stats: Record<string, { total: number; solved: number }> = {}
-    questions.value.forEach((q) => {
+    for (const q of questions.value) {
       if (!stats[q.topic]) stats[q.topic] = { total: 0, solved: 0 }
       stats[q.topic].total++
       if (q.isSolved) stats[q.topic].solved++
-    })
+    }
     return stats
   })
 
-  // ─── Actions ───
+  /** Count of all questions (filtered) under a topic, including sub-topics */
+  function getTopicQuestionCount(topicName: string): number {
+    const group = topicGroups.value.find((g) => g.name === topicName)
+    if (!group) return 0
+    return group.questions.length + group.subTopics.reduce((sum, st) => sum + st.questions.length, 0)
+  }
+
+  // ═══════════════════════════════════════════════════
+  // ─── Actions (intent-based mutations) ───
+  // ═══════════════════════════════════════════════════
 
   async function initialize() {
     loading.value = true
@@ -109,10 +137,12 @@ export const useSheetStore = defineStore('sheet', () => {
     }
   }
 
-  // Topic actions
+  // ─── Topic CRUD ───
+
   async function addTopic(name: string) {
     try {
-      sheet.value = await api.addTopic(name)
+      await api.addTopic(name)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -121,8 +151,8 @@ export const useSheetStore = defineStore('sheet', () => {
 
   async function updateTopic(oldName: string, newName: string) {
     try {
-      sheet.value = await api.updateTopic(oldName, newName)
-      questions.value = api.getQuestions()
+      await api.updateTopic(oldName, newName)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -131,26 +161,35 @@ export const useSheetStore = defineStore('sheet', () => {
 
   async function deleteTopic(name: string) {
     try {
-      sheet.value = await api.deleteTopic(name)
-      questions.value = api.getQuestions()
+      await api.deleteTopic(name)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
     }
   }
 
-  async function reorderTopics(newOrder: string[]) {
+  /**
+   * Intent-based topic reorder: "move the topic at oldIndex to newIndex"
+   * The store computes the new order — the component never builds arrays.
+   */
+  async function moveTopic(oldIndex: number, newIndex: number) {
+    if (!sheet.value || oldIndex === newIndex) return
+    const newOrder = reorderArray(sheet.value.config.topicOrder, oldIndex, newIndex)
     try {
-      sheet.value = await api.reorderTopics(newOrder)
+      await api.reorderTopics(newOrder)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
     }
   }
 
-  // Sub-topic actions
+  // ─── Sub-Topic CRUD ───
+
   async function addSubTopic(topicName: string, subTopicName: string) {
     try {
-      sheet.value = await api.addSubTopic(topicName, subTopicName)
+      await api.addSubTopic(topicName, subTopicName)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -159,8 +198,8 @@ export const useSheetStore = defineStore('sheet', () => {
 
   async function updateSubTopic(topicName: string, oldName: string, newName: string) {
     try {
-      sheet.value = await api.updateSubTopic(topicName, oldName, newName)
-      questions.value = api.getQuestions()
+      await api.updateSubTopic(topicName, oldName, newName)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -169,28 +208,35 @@ export const useSheetStore = defineStore('sheet', () => {
 
   async function deleteSubTopic(topicName: string, subTopicName: string) {
     try {
-      sheet.value = await api.deleteSubTopic(topicName, subTopicName)
-      questions.value = api.getQuestions()
+      await api.deleteSubTopic(topicName, subTopicName)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
     }
   }
 
-  async function reorderSubTopics(topicName: string, newOrder: string[]) {
+  /**
+   * Intent-based sub-topic reorder within a topic.
+   */
+  async function moveSubTopic(topicName: string, oldIndex: number, newIndex: number) {
+    if (!sheet.value || oldIndex === newIndex) return
+    const subs = sheet.value.config.subTopicOrder[topicName] || []
+    const newOrder = reorderArray(subs, oldIndex, newIndex)
     try {
-      sheet.value = await api.reorderSubTopics(topicName, newOrder)
+      await api.reorderSubTopics(topicName, newOrder)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
     }
   }
 
-  // Question actions
+  // ─── Question CRUD ───
+
   async function addQuestion(payload: CreateQuestionPayload) {
     try {
-      const newQ = await api.addQuestion(payload)
-      questions.value = api.getQuestions()
-      return newQ
+      await api.addQuestion(payload)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -200,7 +246,7 @@ export const useSheetStore = defineStore('sheet', () => {
   async function updateQuestion(payload: { _id: string; title?: string; topic?: string; subTopic?: string | null; resource?: string | null }) {
     try {
       await api.updateQuestion(payload)
-      questions.value = api.getQuestions()
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -210,7 +256,7 @@ export const useSheetStore = defineStore('sheet', () => {
   async function deleteQuestion(questionId: string) {
     try {
       await api.deleteQuestion(questionId)
-      questions.value = api.getQuestions()
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
       throw e
@@ -220,48 +266,81 @@ export const useSheetStore = defineStore('sheet', () => {
   async function toggleSolved(questionId: string) {
     try {
       await api.toggleQuestionSolved(questionId)
-      questions.value = api.getQuestions()
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
     }
   }
 
-  async function reorderQuestions(topic: string, subTopic: string | null, ids: string[]) {
+  /**
+   * Intent-based question reorder within a specific topic + subTopic scope.
+   * Component passes oldIndex/newIndex from SortableJS — store resolves the IDs.
+   */
+  async function moveQuestion(topicName: string, subTopic: string | null, oldIndex: number, newIndex: number) {
+    if (oldIndex === newIndex) return
+
+    // Find the matching question IDs from the current canonical order
+    const scoped = questions.value.filter(
+      (q) => q.topic === topicName && (subTopic === null ? !q.subTopic : q.subTopic === subTopic),
+    )
+    const reordered = reorderArray(scoped, oldIndex, newIndex)
+    const newIdOrder = reordered.map((q) => q._id)
+
     try {
-      await api.reorderQuestions(topic, subTopic, ids)
-      questions.value = api.getQuestions()
+      await api.reorderQuestions(topicName, subTopic, newIdOrder)
+      syncFromApi()
     } catch (e) {
       error.value = (e as Error).message
     }
+  }
+
+  // ─── Filter Actions (thin setters for testability) ───
+
+  function setSearchQuery(query: string) {
+    searchQuery.value = query
+  }
+
+  function setFilterDifficulty(difficulty: string) {
+    filterDifficulty.value = difficulty
   }
 
   return {
-    // State
+    // State (readonly from component perspective — mutate via actions only)
     sheet,
     questions,
     loading,
     error,
     searchQuery,
     filterDifficulty,
-    // Computed
+
+    // Getters
     topicGroups,
     totalQuestions,
     solvedQuestions,
+    progressPercent,
     topicStats,
-    // Actions
+    getTopicQuestionCount,
+
+    // Actions — CRUD
     initialize,
     addTopic,
     updateTopic,
     deleteTopic,
-    reorderTopics,
     addSubTopic,
     updateSubTopic,
     deleteSubTopic,
-    reorderSubTopics,
     addQuestion,
     updateQuestion,
     deleteQuestion,
     toggleSolved,
-    reorderQuestions,
+
+    // Actions — Intent-based reorder
+    moveTopic,
+    moveSubTopic,
+    moveQuestion,
+
+    // Actions — Filters
+    setSearchQuery,
+    setFilterDifficulty,
   }
 })

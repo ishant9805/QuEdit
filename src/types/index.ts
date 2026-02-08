@@ -67,15 +67,11 @@ export interface TopicGroup {
   name: string
   subTopics: SubTopicGroup[]
   questions: SheetQuestion[] // filtered questions without a subtopic
-  allQuestions: SheetQuestion[] // unfiltered questions without a subtopic (for stats)
-  collapsed: boolean
 }
 
 export interface SubTopicGroup {
   name: string
   questions: SheetQuestion[] // filtered questions
-  allQuestions: SheetQuestion[] // unfiltered questions (for stats)
-  collapsed: boolean
 }
 
 // ─── CRUD Payload Types ───

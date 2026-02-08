@@ -1,6 +1,8 @@
 <template>
     <Teleport to="body">
-        <Transition name="modal">
+        <Transition enter-active-class="transition-opacity duration-200 ease-out"
+            leave-active-class="transition-opacity duration-200 ease-in" enter-from-class="opacity-0"
+            leave-to-class="opacity-0">
             <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center" @click.self="$emit('close')">
                 <div class="fixed inset-0 bg-black/60 backdrop-blur-sm"></div>
                 <div class="relative bg-gray-900 border border-white/10 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
@@ -27,15 +29,3 @@ defineEmits<{
     close: []
 }>()
 </script>
-
-<style scoped>
-.modal-enter-active,
-.modal-leave-active {
-    transition: opacity 0.2s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-    opacity: 0;
-}
-</style>
