@@ -1,10 +1,12 @@
 <script setup lang="ts"></script>
 
 <template>
-  <h1>You did it!</h1>
+  <div class=" rounded-lg p-6 m-4 bg-gradient-to-r from-blue-500 to-purple-500 text-center">
+    <h1 class="text-4xl py-2 font-bold">Question Management System</h1>
+    <p>Organize, manage, and track your question bank with hierarchical topics</p>
+
+  </div>
   <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
   </p>
 </template>
 
