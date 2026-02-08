@@ -45,7 +45,7 @@ export const useSheetStore = defineStore('sheet', () => {
   /** Generic array reorder: move item at oldIndex to newIndex */
   function reorderArray<T>(arr: T[], oldIndex: number, newIndex: number): T[] {
     const result = [...arr]
-    const [item] = result.splice(oldIndex, 1)
+    const item = result.splice(oldIndex, 1)[0] as T
     result.splice(newIndex, 0, item)
     return result
   }
@@ -106,8 +106,9 @@ export const useSheetStore = defineStore('sheet', () => {
     const stats: Record<string, { total: number; solved: number }> = {}
     for (const q of questions.value) {
       if (!stats[q.topic]) stats[q.topic] = { total: 0, solved: 0 }
-      stats[q.topic].total++
-      if (q.isSolved) stats[q.topic].solved++
+      const entry = stats[q.topic]!
+      entry.total++
+      if (q.isSolved) entry.solved++
     }
     return stats
   })

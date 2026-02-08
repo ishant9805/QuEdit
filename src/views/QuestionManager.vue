@@ -277,7 +277,7 @@
         <ModalOverlay :show="showAddSubTopicModal" @close="showAddSubTopicModal = false">
             <h3 class="text-lg font-semibold text-white mb-2">Add Sub-Topic</h3>
             <p class="text-sm text-gray-400 mb-4">Under topic: <strong class="text-gray-200">{{ modalTopicContext
-            }}</strong></p>
+                    }}</strong></p>
             <input v-model="newSubTopicName" type="text" placeholder="Sub-topic name"
                 class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
                 @keyup.enter="handleAddSubTopic" />
@@ -666,8 +666,10 @@ function initSortables() {
     // 3. Questions — intent: moveQuestion(topic, subTopic, oldIndex, newIndex)
     for (const [key, el] of Object.entries(questionListRefs.value)) {
         if (!el) continue
-        const [topicName, subTopicPart] = key.split('::')
-        const subTopic = subTopicPart === '__root__' ? null : subTopicPart
+        const parts = key.split('::')
+        const topicName = parts[0]!
+        const subTopicPart = parts[1]
+        const subTopic = subTopicPart === '__root__' ? null : (subTopicPart ?? null)
 
         questionSortableInstances[key] = Sortable.create(el, {
             animation: 200,
